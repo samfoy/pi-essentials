@@ -204,20 +204,32 @@ When you have completed the task, do these two things:
 1. Use the write tool to save your complete findings/summary to ${resultFile}
 2. Then say "SUBAGENT COMPLETE" so I know you're done.`;
 
-    // Small delay to let pi initialize, then paste the prompt as one block.
+    // Wait for pi to finish loading, then paste the prompt as one block.
     // tmux send-keys treats \n as Enter keypresses, splitting multi-line
     // prompts into separate inputs. Use load-buffer + paste-buffer instead.
-    setTimeout(() => {
+    // Poll the pane until pi's status bar appears (indicates ready for input).
+    const maxWaitMs = 30_000;
+    const pollMs = 1_000;
+    const waitStart = Date.now();
+
+    const readyPoller = setInterval(() => {
       try {
+        const pane = execFileSync("tmux", ["capture-pane", "-t", pasteTarget, "-p"],
+          { encoding: "utf8" });
+        const ready = /\$\d+\.\d+/.test(pane); // pi's cost indicator in status bar
+        if (!ready && Date.now() - waitStart < maxWaitMs) return;
+
+        clearInterval(readyPoller);
         writeFileSync(promptFile, framedTask);
         const bufferName = `${tmuxName}-prompt`;
         execFileSync("tmux", ["load-buffer", "-b", bufferName, promptFile], { stdio: "ignore" });
         execFileSync("tmux", ["paste-buffer", "-dp", "-b", bufferName, "-t", pasteTarget], { stdio: "ignore" });
         execFileSync("tmux", ["send-keys", "-t", pasteTarget, "Enter"], { stdio: "ignore" });
       } catch {
-        // tmux window/session may have died
+        // pane may have died
+        if (Date.now() - waitStart >= maxWaitMs) clearInterval(readyPoller);
       }
-    }, 2000);
+    }, pollMs);
 
     const entry: SubagentEntry = {
       mode: "interactive",
