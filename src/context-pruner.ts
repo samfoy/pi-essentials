@@ -26,9 +26,11 @@ const PRUNABLE_TOOLS = new Set([
   "code_overview",
 ]);
 
+const PRUNE_THRESHOLD = 4; // only nudge after this many unpruned results accumulate
+
 const NUDGE = `
 <context_management>
-After processing results from search tools (knowledge_search, session_search, session_read, graph_query, code_search, code_overview), call context_prune to replace the bulky result with a short summary of what you extracted. This keeps the session lean. Prune aggressively — keep only facts you'll reference later. You can prune by tool name (prunes the most recent call to that tool) or by tool_use_id for precision.
+You have search/read tool results accumulating in context. When you've finished a research phase and are moving on (to implementation, a different question, or a new line of investigation), call context_prune on results you no longer need to reference directly. Do NOT prune results you're still actively working with — only prune once you've extracted what you need and are done with that line of inquiry. Prune by tool_name (most recent call) or tool_use_id for precision.
 </context_management>`;
 
 export default function contextPruner(pi: ExtensionAPI) {
@@ -73,7 +75,8 @@ export default function contextPruner(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event) => {
-    if (!hasPrunableTools) return;
+    const unpruned = [...prunableCalls.keys()].filter((id) => !pruned.has(id)).length;
+    if (unpruned < PRUNE_THRESHOLD) return;
     return { systemPrompt: event.systemPrompt + NUDGE };
   });
 
