@@ -20,7 +20,8 @@
       "./src/markdown-viewer.ts",
       "./src/screenshot.ts",
       "./src/subagent.ts",
-      "./src/context-pruner.ts"
+      "./src/context-pruner.ts",
+      "./src/daily-log.ts"
     ]
   },
   "peerDependencies": {
