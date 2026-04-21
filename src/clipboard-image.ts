@@ -19,7 +19,7 @@ const BASE64_SIGNATURES: Record<string, string> = {
 
 const MIN_BASE64_LENGTH = 100;
 
-function detectBase64Image(text: string): { data: string; mimeType: string; remaining: string } | null {
+export function detectBase64Image(text: string): { data: string; mimeType: string; remaining: string } | null {
 	const trimmed = text.trim();
 
 	for (const [sig, mimeType] of Object.entries(BASE64_SIGNATURES)) {

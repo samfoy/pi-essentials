@@ -19,6 +19,7 @@ pi install npm:pi-essentials
 | **Markdown Viewer** | Rendered markdown preview on Ctrl+O for `.md` files, plus `/mdview` and `/mermaid` commands |
 | **Screenshot** | `/ss` command — grab clipboard image or send a file to the agent. Requires kitty terminal + `kitten` binary |
 | **Context Pruner** | `context_prune` tool — lets the agent replace bulky search results with short summaries to free context space |
+| **Daily Log** | `daily_log` tool — append timestamped entries to a daily markdown note (configurable via env vars) |
 | **Subagent** | `subagent` and `subagent_status` tools for spawning background pi instances whose results auto-inject back |
 
 ## Requirements

@@ -25,12 +25,12 @@ function err(text: string): ToolResult {
   return { content: [{ type: "text", text: `Error: ${text}` }], details: {} };
 }
 
-function resolveDir(envVal: string | undefined): string {
+export function resolveDir(envVal: string | undefined): string {
   const raw = envVal || "~/daily-notes";
   return raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
 }
 
-function todayStr(): string {
+export function todayStr(): string {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
@@ -38,7 +38,7 @@ function todayStr(): string {
   return `${y}-${m}-${d}`;
 }
 
-function nowTimestamp(): string {
+export function nowTimestamp(): string {
   const now = new Date();
   const h = String(now.getHours()).padStart(2, "0");
   const min = String(now.getMinutes()).padStart(2, "0");

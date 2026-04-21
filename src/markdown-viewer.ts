@@ -19,11 +19,9 @@ import * as path from "node:path";
 import type { ExtensionAPI, EditToolDetails, ReadToolDetails, Theme } from "@mariozechner/pi-coding-agent";
 import { createEditTool, createReadTool, createWriteTool, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
 import { Container, Image, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
+import { isMd, extractMermaidBlocks } from "./markdown-utils.js";
 
-function isMd(filePath: string): boolean {
-	return /\.(md|mdx|markdown)$/i.test(filePath || "");
-}
-
+export { isMd, extractMermaidBlocks };
 const MERMAID_DIR = path.join(os.tmpdir(), "pi-mermaid");
 
 function ensureMermaidDir(): string {
@@ -31,15 +29,6 @@ function ensureMermaidDir(): string {
 	return MERMAID_DIR;
 }
 
-function extractMermaidBlocks(content: string): string[] {
-	const blocks: string[] = [];
-	const re = /```mermaid\s*\n([\s\S]*?)```/g;
-	let m: RegExpExecArray | null;
-	while ((m = re.exec(content)) !== null) {
-		blocks.push(m[1].trim());
-	}
-	return blocks;
-}
 
 interface MermaidResult {
 	filePath: string;
