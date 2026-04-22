@@ -5,7 +5,7 @@ Essential extensions for [pi](https://github.com/badlogic/pi-coding-agent) — q
 ## Install
 
 ```bash
-pi install npm:pi-essentials
+pi install npm:@samfp/pi-essentials
 ```
 
 ## What's Included
