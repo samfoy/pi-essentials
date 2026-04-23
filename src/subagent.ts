@@ -179,11 +179,56 @@ export default function (pi: ExtensionAPI) {
 
     let buffer = "";
     let stderr = "";
+    let completed = false;
+
+    const finishRun = (code: number) => {
+      if (completed) return;
+      completed = true;
+      if (buffer.trim()) processLine(buffer);
+      run.exitCode = code;
+      run.finishedAt = Date.now();
+
+      const elapsed = elapsedStr(run.startTime, run.finishedAt);
+      const output = getFinalText(run.messages);
+      const isError = run.exitCode !== 0 || run.stopReason === "error" || run.stopReason === "aborted";
+
+      // Write result file for interop
+      const resultPath = `/tmp/subagent-${id}-result.md`;
+      try { writeFileSync(resultPath, output || "(no output)"); } catch {}
+
+      // Build injection message
+      const usageStr = formatUsage(run.usage, run.model);
+      let content: string;
+      if (isError) {
+        const err = run.errorMessage || stderr || "(no output)";
+        content = `## Subagent \`${id}\` failed (${elapsed})\n\n${err}`;
+      } else {
+        content = `## Subagent \`${id}\` completed (${elapsed}, ${usageStr})\n\n${output}`;
+      }
+
+      active.delete(id);
+      updateWidget();
+
+      // Kill the process if it's still hanging around
+      try { proc.kill(); } catch {}
+
+      pi.sendMessage(
+        { customType: "subagent-result", content, display: true },
+        { triggerTurn: true, deliverAs: "followUp" }
+      );
+    };
 
     const processLine = (line: string) => {
       if (!line.trim()) return;
       let event: any;
       try { event = JSON.parse(line); } catch { return; }
+
+      // agent_end means the run is complete — don't wait for process close
+      // (pi --mode json -p may hang after agent_end)
+      if (event.type === "agent_end") {
+        finishRun(0);
+        return;
+      }
 
       if (event.type === "message_end" && event.message) {
         const msg = event.message as Message;
@@ -230,48 +275,13 @@ export default function (pi: ExtensionAPI) {
     });
 
     proc.on("close", (code) => {
-      if (buffer.trim()) processLine(buffer);
-      run.exitCode = code ?? 0;
-      run.finishedAt = Date.now();
-
-      const elapsed = elapsedStr(run.startTime, run.finishedAt);
-      const output = getFinalText(run.messages);
-      const isError = run.exitCode !== 0 || run.stopReason === "error" || run.stopReason === "aborted";
-
-      // Write result file for interop
-      const resultPath = `/tmp/subagent-${id}-result.md`;
-      try { writeFileSync(resultPath, output || "(no output)"); } catch {}
-
-      // Build injection message
-      const usageStr = formatUsage(run.usage, run.model);
-      let content: string;
-      if (isError) {
-        const err = run.errorMessage || stderr || "(no output)";
-        content = `## Subagent \`${id}\` failed (${elapsed})\n\n${err}`;
-      } else {
-        content = `## Subagent \`${id}\` completed (${elapsed}, ${usageStr})\n\n${output}`;
-      }
-
-      active.delete(id);
-      updateWidget();
-
-      pi.sendMessage(
-        { customType: "subagent-result", content, display: true },
-        { triggerTurn: true, deliverAs: "followUp" }
-      );
+      // finishRun is idempotent — may have already been called via agent_end
+      finishRun(code ?? 0);
     });
 
     proc.on("error", () => {
-      run.exitCode = 1;
-      run.finishedAt = Date.now();
       run.errorMessage = "Failed to spawn pi process";
-      active.delete(id);
-      updateWidget();
-
-      pi.sendMessage(
-        { customType: "subagent-result", content: `## Subagent \`${id}\` failed\n\nFailed to spawn pi process.`, display: true },
-        { triggerTurn: true, deliverAs: "followUp" }
-      );
+      finishRun(1);
     });
 
     // Don't keep parent alive waiting for child
