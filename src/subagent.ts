@@ -223,11 +223,21 @@ export default function (pi: ExtensionAPI) {
       let event: any;
       try { event = JSON.parse(line); } catch { return; }
 
-      // agent_end means the run is complete — don't wait for process close
-      // (pi --mode json -p may hang after agent_end)
+      // agent_end or a turn_end with no pending tool calls means the run
+      // is complete — don't wait for process close (pi --mode json -p can
+      // hang in extension shutdown for minutes).
       if (event.type === "agent_end") {
         finishRun(0);
         return;
+      }
+      if (event.type === "turn_end" && event.message) {
+        const msg = event.message as Message;
+        const hasToolCall = msg.content.some((p: any) => p.type === "toolCall");
+        const errored = msg.stopReason === "error" || msg.stopReason === "aborted";
+        if (!hasToolCall && !errored) {
+          finishRun(0);
+          return;
+        }
       }
 
       if (event.type === "message_end" && event.message) {
