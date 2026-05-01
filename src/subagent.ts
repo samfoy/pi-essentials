@@ -74,9 +74,14 @@ function getFinalText(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === "assistant") {
+      // Concatenate ALL text parts — pi emits multiple text parts per message
+      // (e.g. a whitespace separator after thinking, then the actual content).
+      // Returning only the first text part often yields just "\n\n".
+      const texts: string[] = [];
       for (const part of msg.content) {
-        if (part.type === "text") return part.text;
+        if (part.type === "text") texts.push(part.text);
       }
+      if (texts.length > 0) return texts.join("").trim();
     }
   }
   return "";
@@ -168,7 +173,13 @@ export default function (pi: ExtensionAPI) {
       usage: emptyUsage(),
     };
 
-    const piArgs: string[] = ["--mode", "json", "-p", "--no-session", task];
+    // Prepend instruction to prevent nested subagent spawning
+    const framedTask = [
+      "IMPORTANT: You are running as a subagent. Do NOT spawn sub-subagents — do all the work yourself directly.",
+      "",
+      task,
+    ].join("\n");
+    const piArgs: string[] = ["--mode", "json", "-p", "--no-session", framedTask];
     const invocation = getPiInvocation(piArgs);
 
     const proc = spawn(invocation.command, invocation.args, {
