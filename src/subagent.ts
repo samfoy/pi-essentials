@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { writeFile, readFile, unlink, access } from "node:fs/promises";
 import { existsSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -41,10 +41,14 @@ interface TrackedRun {
   stopReason?: string;
   errorMessage?: string;
   lastToolCall?: string;
+  proc?: ChildProcess;
   // Interactive-only
   tmuxSession?: string;
   resultFile?: string;
   watcher?: ReturnType<typeof setInterval>;
+  // Timeout
+  timeoutMs?: number;
+  timeoutTimer?: ReturnType<typeof setTimeout>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -157,6 +161,45 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  // ── Kill/cleanup helper ──
+
+  function killRun(run: TrackedRun, reason: "killed" | "timeout"): void {
+    if (run.timeoutTimer) clearTimeout(run.timeoutTimer);
+    if (run.watcher) clearInterval(run.watcher);
+
+    if (run.mode === "background" && run.proc) {
+      try { run.proc.kill("SIGTERM"); } catch {}
+      // Force kill after 5s if still alive
+      setTimeout(() => { try { run.proc?.kill("SIGKILL"); } catch {} }, 5000);
+    }
+
+    if (run.mode === "interactive" && run.tmuxSession) {
+      try {
+        execFileSync("tmux", ["send-keys", "-t", run.tmuxSession, "C-c", ""], { stdio: "ignore" });
+        execFileSync("tmux", ["send-keys", "-t", run.tmuxSession, "exit", "Enter"], { stdio: "ignore" });
+      } catch {}
+    }
+
+    run.exitCode = reason === "timeout" ? 124 : 130;
+    run.finishedAt = Date.now();
+    const elapsed = elapsedStr(run.startTime, run.finishedAt);
+    active.delete(run.id);
+    updateWidget();
+
+    const label = reason === "timeout"
+      ? `timed out after ${Math.round((run.timeoutMs || 0) / 60000)}min`
+      : "killed by user";
+
+    pi.sendMessage(
+      {
+        customType: "subagent-result",
+        content: `## Subagent \`${run.id}\` ${label} (${elapsed})\n\nThe subagent was ${label}.`,
+        display: true,
+      },
+      { triggerTurn: true, deliverAs: "followUp" }
+    );
+  }
+
   // ── Background mode: fire-and-forget with JSON streaming ──
 
   function spawnBackground(
@@ -187,6 +230,7 @@ export default function (pi: ExtensionAPI) {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    run.proc = proc;
 
     let buffer = "";
     let stderr = "";
@@ -194,6 +238,7 @@ export default function (pi: ExtensionAPI) {
 
     const finishRun = (code: number) => {
       if (completed) return;
+      if (run.timeoutTimer) { clearTimeout(run.timeoutTimer); run.timeoutTimer = undefined; }
       completed = true;
       if (buffer.trim()) processLine(buffer);
       run.exitCode = code;
@@ -370,7 +415,11 @@ When you have completed the task, do these two things:
         execFileSync("tmux", ["paste-buffer", "-dp", "-b", bufferName, "-t", pasteTarget], { stdio: "ignore" });
         execFileSync("tmux", ["send-keys", "-t", pasteTarget, "Enter"], { stdio: "ignore" });
       } catch {
-        if (Date.now() - waitStart >= maxWaitMs) clearInterval(readyPoller);
+        if (Date.now() - waitStart >= maxWaitMs) {
+          clearInterval(readyPoller);
+          // Paste failed after max wait — trigger cleanup to avoid watcher leak
+          injectResult();
+        }
       }
     }, 1000);
 
@@ -387,6 +436,7 @@ When you have completed the task, do these two things:
 
     const injectResult = async () => {
       const elapsed = elapsedStr(run.startTime);
+      if (run.timeoutTimer) { clearTimeout(run.timeoutTimer); run.timeoutTimer = undefined; }
       if (run.watcher) clearInterval(run.watcher);
       active.delete(id);
       updateWidget();
@@ -434,6 +484,7 @@ When you have completed the task, do these two things:
     widgetCtx = ctx;
     for (const [, entry] of active) {
       if (entry.watcher) clearInterval(entry.watcher);
+      if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer);
     }
     active.clear();
   });
@@ -441,6 +492,7 @@ When you have completed the task, do these two things:
   pi.on("session_shutdown", async () => {
     for (const [, entry] of active) {
       if (entry.watcher) clearInterval(entry.watcher);
+      if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer);
     }
     widgetCtx = null;
   });
@@ -484,10 +536,15 @@ When you have completed the task, do these two things:
           description: "If true, spawns a full pi session in a tmux window the user can switch to. Default: false (background pi -p).",
         })
       ),
+      timeout: Type.Optional(
+        Type.Number({
+          description: "Timeout in minutes. Subagent is auto-killed when exceeded. Default: 10.",
+        })
+      ),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { id, task, interactive } = params;
+      const { id, task, interactive, timeout } = params;
       const cwd = params.workingDir || ctx.cwd;
       widgetCtx = ctx; // ensure widget works
 
@@ -495,8 +552,12 @@ When you have completed the task, do these two things:
         throw new Error(`Subagent '${id}' is already running. Use a different ID or wait for it to finish.`);
       }
 
+      const timeoutMs = (timeout || 10) * 60_000;
+
       if (interactive) {
         const run = spawnInteractive(id, task, cwd);
+        run.timeoutMs = timeoutMs;
+        run.timeoutTimer = setTimeout(() => killRun(run, "timeout"), timeoutMs);
         active.set(id, run);
         updateWidget();
 
@@ -511,6 +572,8 @@ When you have completed the task, do these two things:
 
       // Background mode — fire and forget
       const run = spawnBackground(id, task, cwd);
+      run.timeoutMs = timeoutMs;
+      run.timeoutTimer = setTimeout(() => killRun(run, "timeout"), timeoutMs);
       active.set(id, run);
       updateWidget();
 
@@ -555,6 +618,39 @@ When you have completed the task, do these two things:
           text: `**${active.size} subagent(s) running:**\n${lines.join("\n")}`,
         }],
         details: { count: active.size, ids: Array.from(active.keys()) },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "subagent_kill",
+    label: "Kill Subagent",
+    description: "Terminate a running subagent by ID",
+    promptSnippet: "Kill a running subagent",
+    parameters: Type.Object({
+      id: Type.String({
+        description: "ID of the subagent to kill",
+      }),
+    }),
+
+    async execute(_toolCallId, params) {
+      const { id } = params;
+      const run = active.get(id);
+      if (!run) {
+        throw new Error(`No subagent with ID '${id}' found. It may have already completed.`);
+      }
+      if (run.exitCode !== undefined) {
+        throw new Error(`Subagent '${id}' has already finished.`);
+      }
+
+      killRun(run, "killed");
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Subagent '${id}' has been killed.`,
+        }],
+        details: { id, killed: true },
       };
     },
   });
