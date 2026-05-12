@@ -12,9 +12,14 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { writeFile, readFile, unlink, access } from "node:fs/promises";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync, createWriteStream, type WriteStream } from "node:fs";
 import { homedir } from "node:os";
 import type { Message } from "@mariozechner/pi-ai";
+import {
+  buildActivityTrail,
+  formatFailureBody,
+  type ToolCallEvent,
+} from "./subagent-diagnostics.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -34,6 +39,7 @@ interface TrackedRun {
   startTime: number;
   finishedAt?: number;
   exitCode?: number;
+  signal?: NodeJS.Signals;
   // Background-only streaming state
   messages: Message[];
   usage: Usage;
@@ -232,6 +238,25 @@ export default function (pi: ExtensionAPI) {
     });
     run.proc = proc;
 
+    // Mirror the raw JSON event stream to /tmp for post-mortem analysis.
+    // Unlike result.md (final assistant text only) and err.log (stderr only),
+    // this captures every event pi emitted — tool calls, tool results,
+    // thinking blocks, message deltas. Essential when a subagent fails mid-run:
+    // `jq . < /tmp/subagent-<id>-events.jsonl` reconstructs what it was doing.
+    const eventsPath = `/tmp/subagent-${id}-events.jsonl`;
+    let eventStream: WriteStream | undefined;
+    try {
+      eventStream = createWriteStream(eventsPath, { flags: "w" });
+      // Swallow stream errors — a failure to write the post-mortem log should
+      // never cascade into the subagent's own execution.
+      eventStream.on("error", () => {
+        try { eventStream?.destroy(); } catch {}
+        eventStream = undefined;
+      });
+    } catch {
+      eventStream = undefined;
+    }
+
     let buffer = "";
     let stderr = "";
     let completed = false;
@@ -244,9 +269,21 @@ export default function (pi: ExtensionAPI) {
       run.exitCode = code;
       run.finishedAt = Date.now();
 
+      // Flush + close the post-mortem event log (best-effort).
+      try { eventStream?.end(); } catch {}
+
       const elapsed = elapsedStr(run.startTime, run.finishedAt);
       const output = getFinalText(run.messages);
-      const isError = run.exitCode !== 0 || run.stopReason === "error" || run.stopReason === "aborted";
+      // A signal-only kill (`code === null` in proc.close, captured into
+      // run.signal) without a preceding error/aborted turn_end previously
+      // routed through the "completed" branch — defeating the whole point of
+      // capturing the signal. Including `run.signal` here ensures signal-killed
+      // subagents always surface through formatFailureBody with the signal field.
+      const isError =
+        run.exitCode !== 0 ||
+        run.signal !== undefined ||
+        run.stopReason === "error" ||
+        run.stopReason === "aborted";
 
       // Write result file for interop
       const resultPath = `/tmp/subagent-${id}-result.md`;
@@ -256,8 +293,40 @@ export default function (pi: ExtensionAPI) {
       const usageStr = formatUsage(run.usage, run.model);
       let content: string;
       if (isError) {
-        const err = run.errorMessage || stderr || "(no output)";
-        content = `## Subagent \`${id}\` failed (${elapsed})\n\n${err}`;
+        // Harvest the full tool-call trail from the subagent's assistant
+        // messages. The extension already tracks `run.lastToolCall` for the
+        // widget; the failure body gets the complete (capped) trail so the
+        // parent agent can decide its next move without opening events.jsonl.
+        const events: ToolCallEvent[] = [];
+        for (const msg of run.messages) {
+          if (msg.role !== "assistant") continue;
+          for (const part of msg.content) {
+            if (part.type === "toolCall") {
+              events.push({
+                name: part.name,
+                arguments: part.arguments as Record<string, unknown>,
+              });
+            }
+          }
+        }
+        const activityTrail = buildActivityTrail(events, {
+          eventsFile: eventStream ? eventsPath : undefined,
+        });
+        const body = formatFailureBody({
+          errorMessage: run.errorMessage,
+          stopReason: run.stopReason,
+          exitCode: run.exitCode,
+          signal: run.signal,
+          stderr,
+          activityTrail,
+          usageLine: run.usage.turns > 0 ? usageStr : undefined,
+          partialOutput: output,
+        });
+        // Only point at the events file if the stream was successfully opened.
+        const footer = eventStream
+          ? `_Post-mortem: \`jq . < ${eventsPath}\`_`
+          : "";
+        content = `## Subagent \`${id}\` failed (${elapsed})\n\n${body}${footer ? `\n\n${footer}` : ""}`;
       } else {
         content = `## Subagent \`${id}\` completed (${elapsed}, ${usageStr})\n\n${output}`;
       }
@@ -330,6 +399,7 @@ export default function (pi: ExtensionAPI) {
     };
 
     proc.stdout.on("data", (data: Buffer) => {
+      try { eventStream?.write(data); } catch {}
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
@@ -340,8 +410,9 @@ export default function (pi: ExtensionAPI) {
       stderr += data.toString();
     });
 
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       // finishRun is idempotent — may have already been called via agent_end
+      if (signal) run.signal = signal;
       finishRun(code ?? 0);
     });
 
