@@ -10,7 +10,7 @@
  *   DAILY_LOG_TEMPLATE  — Path to a template file for new notes (optional)
  *   DAILY_LOG_CREATE_CMD — Shell command to create new notes (optional, receives DATE env var)
  */
-import type { ExtensionAPI, AgentToolResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { join } from "node:path";
 import { homedir } from "node:os";

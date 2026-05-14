@@ -8,7 +8,7 @@
  * Uses the `context` event to swap content before it reaches the LLM,
  * same pattern as image-context-pruner.
  */
-import type { ExtensionAPI, AgentToolResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 type ToolResult = AgentToolResult<unknown>;

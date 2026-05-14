@@ -5,7 +5,7 @@
  * before each LLM call. Images stay in the session file for history,
  * but don't eat context tokens on subsequent turns.
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("context", async (event, _ctx) => {

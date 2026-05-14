@@ -10,7 +10,7 @@
  * so the tmux window tracks the cleaned session name rather than staying
  * on the raw first-input truncation forever.
  */
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { basename } from "node:path";
 
 export default function (pi: ExtensionAPI) {

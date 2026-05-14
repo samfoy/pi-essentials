@@ -32,7 +32,7 @@
     "tsx": "^4.21.0"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": ">=0.57.0",
-    "@mariozechner/pi-tui": ">=0.57.0"
+    "@earendil-works/pi-coding-agent": ">=0.57.0",
+    "@earendil-works/pi-tui": ">=0.57.0"
   }
 }

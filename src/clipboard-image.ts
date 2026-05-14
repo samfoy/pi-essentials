@@ -10,7 +10,7 @@
  * If the paste is *only* base64 image data, a default prompt is injected.
  * If there's text alongside the base64, the text is kept and the image attached.
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const BASE64_SIGNATURES: Record<string, string> = {
 	iVBOR: "image/png",
