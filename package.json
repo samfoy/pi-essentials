@@ -2,6 +2,7 @@
   "name": "@samfp/pi-essentials",
   "version": "0.2.3",
   "description": "Essential extensions for pi — auto session naming, compact header, clipboard images, image pruning, markdown viewer, screenshots, and subagents.",
+  "type": "module",
   "keywords": [
     "pi-package",
     "extensions"
@@ -11,25 +12,36 @@
     "type": "git",
     "url": "https://github.com/samfoy/pi-essentials"
   },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "pi": {
     "extensions": [
-      "./src/auto-session-name.ts",
-      "./src/auto-title.ts",
-      "./src/compact-header.ts",
-      "./src/clipboard-image.ts",
-      "./src/image-context-pruner.ts",
-      "./src/markdown-viewer.ts",
-      "./src/screenshot.ts",
-      "./src/subagent.ts",
-      "./src/context-pruner.ts",
-      "./src/daily-log.ts"
+      "./dist/auto-session-name.js",
+      "./dist/auto-title.js",
+      "./dist/compact-header.js",
+      "./dist/clipboard-image.js",
+      "./dist/image-context-pruner.js",
+      "./dist/markdown-viewer.js",
+      "./dist/screenshot.js",
+      "./dist/subagent.js",
+      "./dist/context-pruner.js",
+      "./dist/daily-log.js"
     ]
   },
   "scripts": {
-    "test": "node --test --import tsx src/tests/*.test.ts"
+    "test": "node --test --import tsx src/tests/*.test.ts",
+    "build": "esbuild src/auto-session-name.ts src/auto-title.ts src/compact-header.ts src/clipboard-image.ts src/image-context-pruner.ts src/markdown-viewer.ts src/screenshot.ts src/subagent.ts src/context-pruner.ts src/daily-log.ts --bundle --platform=node --format=esm --outdir=dist --sourcemap --packages=external --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-tui --external:@earendil-works/pi-ai --external:@sinclair/typebox",
+    "check": "tsc --noEmit",
+    "dev": "esbuild src/auto-session-name.ts src/auto-title.ts src/compact-header.ts src/clipboard-image.ts src/image-context-pruner.ts src/markdown-viewer.ts src/screenshot.ts src/subagent.ts src/context-pruner.ts src/daily-log.ts --bundle --platform=node --format=esm --outdir=dist --sourcemap --watch --packages=external --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-tui --external:@earendil-works/pi-ai --external:@sinclair/typebox",
+    "prepare": "npm run build"
   },
   "devDependencies": {
-    "tsx": "^4.21.0"
+    "esbuild": "^0.28.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.57.0",

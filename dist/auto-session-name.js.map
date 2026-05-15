@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../src/auto-session-name.ts"],
+  "sourcesContent": ["/**\n * oh-pi Auto Session Name Extension\n *\n * Automatically names sessions based on the first user message.\n */\nimport type { ExtensionAPI } from \"@earendil-works/pi-coding-agent\";\n\nexport default function (pi: ExtensionAPI) {\n  let named = false;\n\n  pi.on(\"session_start\", async (_event, ctx) => {\n    named = !!pi.getSessionName();\n  });\n\n  pi.on(\"agent_end\", async (event) => {\n    if (named) return;\n    const userMsg = event.messages.find((m) => m.role === \"user\");\n    if (!userMsg) return;\n    const text = typeof userMsg.content === \"string\"\n      ? userMsg.content\n      : userMsg.content.filter((b) => b.type === \"text\").map((b) => (b as { text: string }).text).join(\" \");\n    if (!text) return;\n    const name = text.slice(0, 60).replace(/\\n/g, \" \").trim();\n    if (name) {\n      pi.setSessionName(name);\n      named = true;\n    }\n  });\n}\n"],
+  "mappings": ";AAOe,SAAR,0BAAkB,IAAkB;AACzC,MAAI,QAAQ;AAEZ,KAAG,GAAG,iBAAiB,OAAO,QAAQ,QAAQ;AAC5C,YAAQ,CAAC,CAAC,GAAG,eAAe;AAAA,EAC9B,CAAC;AAED,KAAG,GAAG,aAAa,OAAO,UAAU;AAClC,QAAI,MAAO;AACX,UAAM,UAAU,MAAM,SAAS,KAAK,CAAC,MAAM,EAAE,SAAS,MAAM;AAC5D,QAAI,CAAC,QAAS;AACd,UAAM,OAAO,OAAO,QAAQ,YAAY,WACpC,QAAQ,UACR,QAAQ,QAAQ,OAAO,CAAC,MAAM,EAAE,SAAS,MAAM,EAAE,IAAI,CAAC,MAAO,EAAuB,IAAI,EAAE,KAAK,GAAG;AACtG,QAAI,CAAC,KAAM;AACX,UAAM,OAAO,KAAK,MAAM,GAAG,EAAE,EAAE,QAAQ,OAAO,GAAG,EAAE,KAAK;AACxD,QAAI,MAAM;AACR,SAAG,eAAe,IAAI;AACtB,cAAQ;AAAA,IACV;AAAA,EACF,CAAC;AACH;",
+  "names": []
+}
