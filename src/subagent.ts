@@ -18,6 +18,7 @@ import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import {
   buildActivityTrail,
   formatFailureBody,
+  formatToolCall,
   type ToolCallEvent,
 } from "./subagent-diagnostics.js";
 
@@ -95,28 +96,6 @@ function getFinalText(messages: Message[]): string {
     }
   }
   return "";
-}
-
-function shortenPath(p: string): string {
-  const home = homedir();
-  return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
-}
-
-function formatToolCallShort(name: string, args: Record<string, any>): string {
-  switch (name) {
-    case "bash": {
-      const cmd = (args.command as string) || "...";
-      return `$ ${cmd.length > 50 ? cmd.slice(0, 50) + "…" : cmd}`;
-    }
-    case "read":
-      return `read ${shortenPath((args.file_path || args.path || "...") as string)}`;
-    case "write":
-      return `write ${shortenPath((args.file_path || args.path || "...") as string)}`;
-    case "edit":
-      return `edit ${shortenPath((args.file_path || args.path || "...") as string)}`;
-    default:
-      return name;
-  }
 }
 
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
@@ -385,7 +364,10 @@ export default function (pi: ExtensionAPI) {
           // Track latest tool call for widget display
           for (const part of msg.content) {
             if (part.type === "toolCall") {
-              run.lastToolCall = formatToolCallShort(part.name, part.arguments);
+              run.lastToolCall = formatToolCall(
+                { name: part.name, arguments: part.arguments as Record<string, unknown> },
+                { maxLineChars: 80, pathStyle: "collapsed", format: "widget" },
+              );
             }
           }
         }

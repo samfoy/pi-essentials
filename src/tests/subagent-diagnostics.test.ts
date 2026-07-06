@@ -2,9 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildActivityTrail,
+  collapsePath,
   DEFAULT_MAX_ACTIVITY_EVENTS,
   fenceFor,
   formatFailureBody,
+  formatToolCall,
   formatToolCallFull,
   MAX_ACTIVITY_LINE_CHARS,
   STDERR_TAIL_BYTES,
@@ -359,6 +361,82 @@ describe("formatToolCallFull", () => {
     };
     const out = formatToolCallFull(event);
     assert.match(out, /- custom-thing: \(unserializable args\)$/);
+  });
+});
+
+describe("formatToolCall — widget format", () => {
+  const WIDGET_OPTS = { maxLineChars: 80, pathStyle: "collapsed" as const, format: "widget" as const };
+  const HOME = process.env.HOME ?? "/home/test";
+
+  it("bash: short command passes through verbatim", () => {
+    const event: ToolCallEvent = { name: "bash", arguments: { command: "ls -la" } };
+    assert.equal(formatToolCall(event, WIDGET_OPTS), "$ ls -la");
+  });
+
+  it("bash: command longer than 50 chars is truncated with ellipsis", () => {
+    const long = "a".repeat(60);
+    const event: ToolCallEvent = { name: "bash", arguments: { command: long } };
+    const out = formatToolCall(event, WIDGET_OPTS);
+    assert.equal(out, `$ ${"a".repeat(50)}\u2026`);
+  });
+
+  it("bash: missing command arg uses '...'", () => {
+    const event: ToolCallEvent = { name: "bash", arguments: {} };
+    assert.equal(formatToolCall(event, WIDGET_OPTS), "$ ...");
+  });
+
+  it("read: path is collapsed to ~", () => {
+    const event: ToolCallEvent = {
+      name: "read",
+      arguments: { file_path: `${HOME}/Projects/foo.ts` },
+    };
+    const out = formatToolCall(event, WIDGET_OPTS);
+    assert.equal(out, `read ~/Projects/foo.ts`);
+  });
+
+  it("write: includes 'write' action word", () => {
+    const event: ToolCallEvent = {
+      name: "write",
+      arguments: { file_path: `${HOME}/out.txt` },
+    };
+    assert.ok(formatToolCall(event, WIDGET_OPTS).startsWith("write "));
+  });
+
+  it("edit: includes 'edit' action word", () => {
+    const event: ToolCallEvent = {
+      name: "edit",
+      arguments: { file_path: `${HOME}/src/main.ts` },
+    };
+    assert.ok(formatToolCall(event, WIDGET_OPTS).startsWith("edit "));
+  });
+
+  it("unknown tool: returns tool name only", () => {
+    const event: ToolCallEvent = { name: "knowledge_search", arguments: { query: "foo" } };
+    assert.equal(formatToolCall(event, WIDGET_OPTS), "knowledge_search");
+  });
+
+  it("collapsePath: replaces home prefix with ~", () => {
+    assert.equal(collapsePath(`${HOME}/foo`, HOME), "~/foo");
+  });
+
+  it("collapsePath: leaves non-home paths untouched", () => {
+    assert.equal(collapsePath("/tmp/bar", HOME), "/tmp/bar");
+  });
+});
+
+describe("formatToolCall — trail format (pathStyle: full)", () => {
+  it("produces same output as formatToolCallFull", () => {
+    const events: ToolCallEvent[] = [
+      { name: "bash", arguments: { command: "ls" } },
+      { name: "read", arguments: { file_path: "/home/user/file.ts" } },
+      { name: "grep", arguments: { pattern: "TODO", path: "/src" } },
+    ];
+    for (const e of events) {
+      assert.equal(
+        formatToolCall(e, { maxLineChars: MAX_ACTIVITY_LINE_CHARS, pathStyle: "full", format: "trail" }),
+        formatToolCallFull(e),
+      );
+    }
   });
 });
 

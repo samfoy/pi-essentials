@@ -6,6 +6,7 @@
  * needs (`@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`,
  * `@sinclair/typebox`). Keep this file free of peer-dep imports.
  */
+import { homedir } from "node:os";
 
 /**
  * Shape of the diagnostic fields used to render a failure body.
@@ -104,59 +105,130 @@ export function truncateTail(s: string, maxChars: number): string {
 }
 
 /**
+ * Options controlling how a tool-call event is rendered for human display.
+ *
+ * - `maxLineChars` — hard cap on the returned string (characters).
+ * - `pathStyle` — `'full'` keeps paths as-is; `'collapsed'` replaces the
+ *   home directory prefix with `~` to fit tighter budgets.
+ * - `format` — `'trail'` (default) produces `- name: detail` suitable for
+ *   activity trails; `'widget'` produces a compact label (`$ cmd`, `read ~…`)
+ *   for live status widgets.
+ */
+export interface ToolCallRenderOptions {
+  maxLineChars: number;
+  pathStyle: "full" | "collapsed";
+  format?: "trail" | "widget";
+}
+
+/** Replace the home directory prefix with `~` for compact display. */
+export function collapsePath(p: string, home: string): string {
+  return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+}
+
+/**
+ * Single source of truth for rendering a {@link ToolCallEvent} as a
+ * human-readable string.  Parameterised on {@link ToolCallRenderOptions}
+ * so the widget and the activity trail share the same argument-parsing
+ * logic; only the truncation budget, path style, and output format differ.
+ *
+ * **trail** format (default): `- name: detail` — suitable for markdown
+ * activity trails rendered in failure bodies.
+ *
+ * **widget** format: compact label (`$ cmd`, `read ~/path`) — byte-identical
+ * to the former `formatToolCallShort` when called with
+ * `{ maxLineChars: 80, pathStyle: 'collapsed', format: 'widget' }`.
+ */
+export function formatToolCall(
+  event: ToolCallEvent,
+  opts: ToolCallRenderOptions,
+): string {
+  const { name, arguments: args } = event;
+  const { maxLineChars, pathStyle, format = "trail" } = opts;
+  const home = homedir();
+
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" ? v : undefined;
+
+  const resolvePath = (v: string): string =>
+    pathStyle === "collapsed" ? collapsePath(v, home) : v;
+
+  if (format === "widget") {
+    // Compact label format — preserves previous formatToolCallShort output.
+    let label: string;
+    switch (name) {
+      case "bash": {
+        const cmd = str(args.command) ?? "...";
+        const trimmed = cmd.length > 50 ? cmd.slice(0, 50) + "\u2026" : cmd;
+        label = `$ ${trimmed}`;
+        break;
+      }
+      case "read":
+        label = `read ${resolvePath((str(args.file_path) ?? str(args.path) ?? "...") as string)}`;
+        break;
+      case "write":
+        label = `write ${resolvePath((str(args.file_path) ?? str(args.path) ?? "...") as string)}`;
+        break;
+      case "edit":
+        label = `edit ${resolvePath((str(args.file_path) ?? str(args.path) ?? "...") as string)}`;
+        break;
+      default:
+        label = name;
+    }
+    return truncateTail(label, maxLineChars);
+  }
+
+  // trail format: `- name: detail`
+  let detail: string;
+  switch (name) {
+    case "bash": {
+      const cmd = str(args.command) ?? "";
+      detail = `$ ${cmd}`;
+      break;
+    }
+    case "read":
+    case "write":
+    case "edit":
+      detail = resolvePath(str(args.file_path) ?? str(args.path) ?? "(no path)");
+      break;
+    case "grep": {
+      const pattern = str(args.pattern) ?? "(no pattern)";
+      const path = resolvePath(str(args.path) ?? ".");
+      detail = `${pattern} in ${path}`;
+      break;
+    }
+    case "find":
+      detail = resolvePath(str(args.pattern) ?? str(args.path) ?? "(no pattern)");
+      break;
+    case "ls":
+      detail = resolvePath(str(args.path) ?? ".");
+      break;
+    default:
+      try {
+        detail = JSON.stringify(args);
+      } catch {
+        detail = "(unserializable args)";
+      }
+  }
+  return truncateTail(`- ${name}: ${detail}`, maxLineChars);
+}
+
+/**
  * Format one tool-call event as a single-line `- tool: detail` entry,
  * truncated to `maxLineChars`. Never collapses paths or elides known
  * arg structure within the budget — full fidelity is the point of the
- * trail. Use `formatToolCallShort` (in the extension) for the live widget,
- * which has different budget constraints.
+ * trail.
  *
- * Unknown tools fall back to a compact JSON rendering of their arguments.
+ * @deprecated Use {@link formatToolCall} with `{ pathStyle: 'full', format: 'trail' }` instead.
  */
 export function formatToolCallFull(
   event: ToolCallEvent,
   maxLineChars: number = MAX_ACTIVITY_LINE_CHARS,
 ): string {
-  const { name, arguments: args } = event;
-  const detail = formatToolDetail(name, args);
-  const line = `- ${name}: ${detail}`;
-  return truncateTail(line, maxLineChars);
-}
-
-/** Compute the detail string for each known tool. Separated from
- *  {@link formatToolCallFull} so the truncation layer stays uniform. */
-function formatToolDetail(name: string, args: Record<string, unknown>): string {
-  const str = (v: unknown): string | undefined =>
-    typeof v === "string" ? v : undefined;
-  switch (name) {
-    case "bash": {
-      const cmd = str(args.command) ?? "";
-      return `$ ${cmd}`;
-    }
-    case "read":
-    case "write":
-    case "edit":
-      // Pi uses `file_path` today; `path` is a legacy fallback for tools
-      // that may still use the older key.
-      return str(args.file_path) ?? str(args.path) ?? "(no path)";
-    case "grep": {
-      const pattern = str(args.pattern) ?? "(no pattern)";
-      const path = str(args.path) ?? ".";
-      return `${pattern} in ${path}`;
-    }
-    case "find":
-      return str(args.pattern) ?? str(args.path) ?? "(no pattern)";
-    case "ls":
-      return str(args.path) ?? ".";
-    default:
-      // Unknown tools (custom extensions, MCP tools, etc.): render args
-      // compactly. JSON.stringify gives a deterministic shape; truncation
-      // handled by the caller.
-      try {
-        return JSON.stringify(args);
-      } catch {
-        return "(unserializable args)";
-      }
-  }
+  return formatToolCall(event, {
+    maxLineChars,
+    pathStyle: "full",
+    format: "trail",
+  });
 }
 
 /**
