@@ -82,6 +82,7 @@ export default function contextPruner(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "context_prune",
+    label: "Context Prune",
     description:
       "Replace a previous tool result with a short summary to free context space. " +
       "Use after processing results from search tools (knowledge_search, session_search, " +

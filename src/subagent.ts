@@ -14,12 +14,12 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { writeFile, readFile, unlink, access } from "node:fs/promises";
 import { existsSync, writeFileSync, createWriteStream, type WriteStream } from "node:fs";
 import { homedir } from "node:os";
-import type { Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import {
   buildActivityTrail,
   formatFailureBody,
   type ToolCallEvent,
-} from "./subagent-diagnostics.ts";
+} from "./subagent-diagnostics.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -356,8 +356,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (event.type === "turn_end" && event.message) {
-        const msg = event.message as Message;
-        const hasToolCall = msg.content.some((p: any) => p.type === "toolCall");
+        const msg = event.message as AssistantMessage;
+        const hasToolCall = Array.isArray(msg.content) && msg.content.some((p: any) => p.type === "toolCall");
         const errored = msg.stopReason === "error" || msg.stopReason === "aborted";
         if (!hasToolCall && !errored) {
           finishRun(0);
@@ -569,7 +569,7 @@ When you have completed the task, do these two things:
   });
 
   // Stash ctx from agent turns so widget works
-  pi.on("agent_turn_start", async (_event, ctx) => {
+  pi.on("turn_start", async (_event, ctx) => {
     widgetCtx = ctx;
   });
 
@@ -669,7 +669,7 @@ When you have completed the task, do these two things:
       if (active.size === 0) {
         return {
           content: [{ type: "text" as const, text: "No subagents currently running." }],
-          details: {},
+          details: { count: 0 as number, ids: [] as string[] },
         };
       }
 
